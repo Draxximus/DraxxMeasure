@@ -71,7 +71,10 @@ try {
     Assert-That ($LASTEXITCODE -eq 0) 'PE dependency inspection failed.'
     $dlls = @($dependents | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^[a-zA-Z0-9_.-]+\.dll$' } | Sort-Object -Unique)
     Assert-That ($dlls.Count -gt 0) 'No PE dependencies parsed; cannot assert portability.'
-    $systemDlls = @('KERNEL32.dll','NTDLL.dll','BCRYPT.dll','ADVAPI32.dll','USERENV.dll','WS2_32.dll','OLE32.dll','OLEAUT32.dll','SHELL32.dll','USER32.dll','GDI32.dll','SECHOST.dll','CRYPT32.dll','RPCRT4.dll','SECUR32.dll','NETAPI32.dll','IPHLPAPI.dll','WINHTTP.dll','PSAPI.dll','VERSION.dll','SYNCHAPI.dll')
+    # ProcessPrng is provided by the Windows OS, not a bundled redistributable:
+    # https://learn.microsoft.com/en-us/windows/win32/seccng/processprng
+    $systemDlls = @('KERNEL32.dll','NTDLL.dll','BCRYPT.dll','BCRYPTPRIMITIVES.dll','ADVAPI32.dll','USERENV.dll','WS2_32.dll','OLE32.dll','OLEAUT32.dll','SHELL32.dll','USER32.dll','GDI32.dll','SECHOST.dll','CRYPT32.dll','RPCRT4.dll','SECUR32.dll','NETAPI32.dll','IPHLPAPI.dll','WINHTTP.dll','PSAPI.dll','VERSION.dll','SYNCHAPI.dll')
+    Write-Host "PE imports to verify: $($dlls -join ', ')"
     foreach ($dll in $dlls) {
         Assert-That ($dll -in $systemDlls -or $dll -match '^(api-ms-win-(core|security)-|ext-ms-win-)[a-zA-Z0-9_.-]+\.dll$') "Unexpected non-OS runtime dependency: $dll (no VC++, SQLite or other sidecar DLLs are allowed)."
     }
