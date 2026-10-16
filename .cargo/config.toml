@@ -1,0 +1,4 @@
+# Portable Windows x64 builds must not require a VC++ redistributable installation.
+# This also informs cc-rs (bundled SQLite) of the static CRT target feature.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

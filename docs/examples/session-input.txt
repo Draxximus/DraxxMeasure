@@ -1,0 +1,40 @@
+/session
+/partnumber
+405363
+9368.9
+5
+0.1
+yes
+/bundle
+68
+71
+67
+80
+/correct 2 =9370.9
+SYNTHETIC transcription correction example
+/undo
+yes
+SYNTHETIC undo example; original retained
+=9381
+/close
+/bundle
+=9363.9
+73
+=9373.9
+/close
+/close
+/partnumber
+413348
+10608.9
+5
+0.1
+yes
+/bundle
+09
+12
+=10603.9
+=10614
+/close
+/close
+/close
+/exit

@@ -1,0 +1,6 @@
+# Stable source line endings on Windows and Linux.
+* text=auto eol=lf
+*.png binary
+*.ttf binary
+# Preserve canonical synthetic export bytes (CSV dialect uses CRLF).
+docs/examples/*.csv -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

@@ -1,0 +1,31 @@
+/target/
+# Local inspection data and generated exports belong outside source control.
+/data/
+/exports/
+/reports/
+/dist/
+# Inspection data must not be committed even when a configurable directory is used.
+*.db
+*.db-*
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
+*.journal
+**/data/
+**/reports/
+**/exports/
+**/measurements/
+*.csv
+*.png
+*.manifest.json
+*.exe
+*.pdb
+*.zip
+*.zip.sha256
+# Deliberate, reviewed synthetic documentation fixtures are not production data.
+!/docs/examples/session-001-item-001.csv
+!/docs/examples/session-001-item-002.csv
+!/docs/examples/session-001.png
+!/docs/examples/session-001-page-002.png
+!/docs/examples/session-001.manifest.json
