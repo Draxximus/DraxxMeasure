@@ -1,5 +1,10 @@
 # Synthetic example report
 
+The checked-in artifacts below use the legacy format-1 layout. Replaying the input
+now produces format-2 reports at each Part Number closure: one combined PNG/CSV
+and a manifest per part, named `session-001-part-405363-item-001.*` and
+`session-001-part-413348-item-002.*`. The measurement populations remain the same.
+
 **SYNTHETIC EXAMPLE — NOT PRODUCTION DATA.** Every observation in this directory
 comes from the explicit fixture lines in `session-input.txt`, not an actual
 inspection or the application's own fabricated measurements.

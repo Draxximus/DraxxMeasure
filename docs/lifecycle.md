@@ -12,7 +12,7 @@ Create Active session
   → add/select InspectionItem (repeat for other Part Numbers as needed)
   → start Open bundle → record committed sequential measurements
   → close bundle → start another bundle/item (repeat)
-  → review → close session → obtain snapshot → analyze/export
+  → review → close Part Number → snapshot/analyze/export → continue or close session
 ```
 
 ## Session transitions
@@ -69,6 +69,8 @@ the measurement committed; use the same request ID and verify its payload. Repea
 equal measured values with different request IDs remain distinct valid observations.
 
 Closing the session and its commit/audit event is atomic. Closure never silently
-closes bundles, discards drafts, or deletes data. Report failure after closure does
-not reopen the session or change observations. Exports can be retried from a fresh
+closes bundles, discards drafts, or deletes data. Part Number context closure
+commits before its automatic report is generated; the session remains Active.
+Report failure does not reverse that context change or modify observations.
+Session closure generates no duplicate automatic report. Exports can be retried from a fresh
 consistent snapshot; each output records its own revision and export identity.

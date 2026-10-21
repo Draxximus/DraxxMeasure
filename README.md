@@ -4,19 +4,14 @@ Lightweight, local-first industrial dimensional inspection, built in Rust.
 The interface is a keyboard-first CLI; a future Tauri 2 desktop
 adapter will reuse the same headless domain, storage, analysis, and reporting.
 
-Repository: https://github.com/Draxximus/DraxxMeasure
-
-```text
-git clone https://github.com/Draxximus/DraxxMeasure.git
-cd DraxxMeasure
-```
-
 ## Phase 2 status
 
 **Implemented:** hierarchical interactive capture, multiple Part Numbers and bundles,
 exact input reconstruction with explicit operator-approved intervals, immediate
 SQLite commits, recovery, traceable undo/correction, descriptive statistics, and
-automatic paginated English PNG reports with exact verification CSVs and a manifest.
+automatic English PNG reports per Part Number with exact verification CSVs and a manifest.
+Interactive terminals open a Ratatui capture screen with the active specification,
+bundle capacity, setup prompts, and keyboard help. Press F10 to view measurement history.
 
 **Mandatory limit:** at most **42 active measurements per bundle**, enforced by
 core rules, write transactions, and SQL triggers. A 43rd active observation is
@@ -33,8 +28,8 @@ Download the versioned **windows-x64.zip** from GitHub Releases Assets, extract 
 to a writable local folder, and launch `draxxmeasure.exe`. The package includes
 the static-CRT release executable, usage instructions, build identity and font
 license, **not** databases or reports. Updates replace only executable/documentation
-files, never `data/` or `reports/`. Every published Windows archive is gated by
-native verification in the Windows Actions workflow.
+files, never `data/` or `reports/`. Native verification is performed by the new
+Windows Actions workflow; it has not been executed on this Linux host.
 
 ## Build and run from source (developers only)
 
@@ -43,7 +38,8 @@ was verified with stable Rust/Cargo 1.97.1 on Linux. The workspace uses edition 
 with minimal purpose-specific dependencies: bundled SQLite, exact JSON audit
 payloads, UUID request IDs, Rust-native Plotters/PNG encoding, UTC formatting, and
 safe temporary-file publication. Core still uses only the standard library. No
-Python runtime, Tauri, terminal dashboard framework, or async runtime is required.
+Python runtime, Tauri, or async runtime is required. Ratatui 0.30.2 and Crossterm
+0.29 provide the terminal screen and cross-platform keyboard handling.
 Building bundled SQLite requires a C compiler (on Windows, an appropriate MSVC
 Build Tools installation). PNG text uses a licensed bundled DejaVu Sans font,
 not platform font discovery or a browser.
@@ -56,6 +52,8 @@ cargo build --workspace --locked
 cargo run -p draxx-cli -- --help
 cargo run -p draxx-cli -- --version
 cargo run -p draxx-cli
+cargo run -p draxx-cli -- --line
+cargo run -p draxx-cli -- --tui --data-dir data
 cargo run -p draxx-cli -- --data-dir data
 cargo run -p draxx-cli -- --database data/inspection.sqlite3 --reports-dir reports
 ```
@@ -72,6 +70,37 @@ working-directory-relative installations should explicitly select their old abso
 database path before updating; no automatic data move or replacement occurs.
 Unsupported startup arguments exit with code 2 before opening storage. Use `/help`
 for interactive commands.
+
+## Terminal screen
+
+Run `cargo run -p draxx-cli` in a terminal, or launch `draxxmeasure.exe` on Windows.
+The screen opens automatically when both input and output are terminals. Use
+`--tui` to require it, or `--line` for the plain interface. Redirected streams and
+`TERM=dumb` select line mode automatically. The full layout needs 72 columns and
+24 rows; smaller terminals show a compact prompt and preserve the draft on resize.
+
+Press **F2** to start a session, **F3** to set up a Part Number, and **F4** to start
+a bundle. Enter `68` or `=9368.9`, then press **Enter**. **F5** closes one context
+level; **F6** starts confirmed undo; **F7** retries a pending write; **F8** exports
+the last closed Part Number. **F9** refreshes status. **F1** opens keyboard help.
+All existing slash commands, including `/resume ID`, work in the entry field.
+
+Use arrows, Home/End, Backspace/Delete, and Ctrl+U to edit. Invalid input stays
+editable. Multiline paste queues the remaining lines: press Enter once per line,
+including setup fields. A failed line does not consume the next queued line.
+Page Up/Down scroll measurement history; the newest entries appear first.
+Ctrl+C, Ctrl+D, and `/exit` leave committed context recoverable; they do not close
+the inspection. Drafts and queued paste are held in memory. Terminal modes are
+restored when the screen exits. See [screen design and behavior](docs/terminal-screen.md).
+
+Every open bundle shows 42 tube positions in five staggered layers, **8–9–8–9–8**.
+`○` means unmeasured; `●` means measured and committed. Positions fill left to
+right, top to bottom, using the current effective SQLite measurement count.
+Confirmed `/undo` frees a position, and `/resume ID` rebuilds progress from saved
+data. At 42/42 the bundle remains open until `/close`. Both indicators are monochrome.
+The plain `--line` interface prints a fresh diagram only when the bundle or count
+changes; the Ratatui screen updates the arrangement in place. Measurement history
+is hidden by default; F10 toggles the table when needed.
 
 ## Example inspection
 
@@ -92,10 +121,10 @@ Approve interval [9318, 9417] mm? yes
 ✓ 9367.2 mm saved [3/42]
 405363/bundle-1> /close
 405363> /close
+✓ PNG report generated
+Report: reports/session-001-part-405363-item-001.png
 session> /close
 ✓ Session closed
-✓ PNG report generated
-Report: reports/session-001.png
 ```
 
 Setup explicitly asks for instrument resolution and approval of abbreviation
@@ -123,12 +152,19 @@ session item and measurement sequences are per bundle.
 - On a storage submission error, pending input stays in memory; `/retry` uses the
   exact original request ID. New measurements and context mutation are blocked
   while that pending write is unresolved.
-- Session closure automatically exports all parts. On export failure the session
-  remains closed and data stays intact. Use `/report ID`, or restart with a writable
-  `--reports-dir`. Retries never overwrite prior outputs; collision-safe names are used.
+- Closing a Part Number exports all of its bundles immediately, while the session
+  remains active. On export failure, the context stays closed and data stays intact.
+  Use `/report` to retry the last closed part or `/report part ITEM_ID` after restart,
+  optionally with another `--reports-dir`. Retries never overwrite prior outputs.
+- Session closure does not generate another automatic report. `/report SESSION_ID`
+  remains available to explicitly export all parts of a closed session.
 
-Reports use up to four bundles per page, with no fixed overall page/bundle/part
-limit. CSV contains original, correction, and effective rows. For verification,
+Each Part Number/specification gets one 1800×2000 PNG combining all bundles into a
+histogram, an ordered measurement plot, and an overall summary. Files are named
+with a safe Part Number label plus session/item IDs. Reselecting and closing a part
+again exports a fresh cumulative snapshot with a new collision-safe name. Bundle
+identities remain in CSV; unlike parts or specification revisions are never pooled.
+CSV contains original, correction, and effective rows. For verification,
 filter `row_kind=effective` and nonempty `value_mm`; audit rows are not extra samples.
 Import canonical CSV columns as **text**: preserved operator inputs beginning with
 `=` can be interpreted as formulas by spreadsheets. The manifest is published last
@@ -150,8 +186,8 @@ by workspace lints. Tests use synthetic data and isolated temporary SQLite datab
 including process termination, competing writers, failed writes, and real PNG decoding.
 Copied-executable isolation and binary-only update preservation are covered by
 host tests. The Actions workflow performs native Windows tests, static CRT/DLL
-inspection and release-ZIP isolation; a green run is required before a Windows
-archive can be published. Host-only checks do not substitute for that native run.
+inspection and release-ZIP isolation; a green run is needed to verify a Windows
+release. This Linux development session cannot claim that remote run occurred.
 
 ## Workspace
 
@@ -183,14 +219,15 @@ select immutable Part Number/specification snapshots; each item has many bundles
 
 ## Verified example artifacts
 
-See [the synthetic sample report](docs/examples/session-001.png) and its
+See [the legacy format-1 synthetic sample report](docs/examples/session-001.png) and its
 [manifest](docs/examples/session-001.manifest.json). These are explicitly labeled
 synthetic examples, not production inspection records. The replayable input and
-verification notes are in [docs/examples](docs/examples/README.md).
+verification notes are in [docs/examples](docs/examples/README.md). Replay generates
+the current format-2 reports, one per Part Number at Part Number closure.
 
 ## Remaining work, subject to approval
 
-Add an operator-approved backup/restore workflow,
+Run the new Windows release workflow on GitHub, add an operator-approved backup/restore workflow,
 instrument/calibration identity integration, richer terminal editing, and measured
 large-session export optimizations. Tauri/SPC/capability analysis remain separate
 future work; no additional phase starts automatically.

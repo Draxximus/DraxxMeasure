@@ -10,13 +10,13 @@ the packaging checks. No Rust, Python, Tauri, SQLite installation, VC++ runtime
 installer, webview, or system font setup is required on the inspection computer.
 
 1. Open the repository's **Releases**, select a version, and download
-   `DraxxMeasure-v0.1.0-windows-x64.zip` under **Assets** (substitute your version).
+   `DraxxMeasure-v0.2.0-windows-x64.zip` under **Assets** (substitute your version).
    Do not download GitHub's automatic **Source code** ZIP as an application.
 2. Download its `.zip.sha256` companion if you want to verify the SHA-256:
 
    ```powershell
-   Get-FileHash .\DraxxMeasure-v0.1.0-windows-x64.zip -Algorithm SHA256
-   Get-Content .\DraxxMeasure-v0.1.0-windows-x64.zip.sha256
+   Get-FileHash .\DraxxMeasure-v0.2.0-windows-x64.zip -Algorithm SHA256
+   Get-Content .\DraxxMeasure-v0.2.0-windows-x64.zip.sha256
    ```
 
    Compare the hex digests. The checksum detects download changes; it is not a
@@ -31,8 +31,10 @@ installer, webview, or system font setup is required on the inspection computer.
    .\draxxmeasure.exe
    ```
 
-No administrator access is needed. `/help` lists the existing measurement workflow;
-the 42-active-measurement rule, reconstruction, correction and closure semantics
+No administrator access is needed. `/help` lists the existing measurement workflow.
+Interactive consoles open the Ratatui screen with F1 keyboard help. Use `--line`
+for plain input, or `--tui` to require the screen. Redirected scripts keep line mode.
+The 42-active-measurement rule, reconstruction, correction and closure semantics
 are unchanged. If an error closes a double-clicked console, launch from PowerShell
 to read the diagnostic and choose a writable path.
 
@@ -47,7 +49,7 @@ DraxxMeasure/
 ├── data/                         created on first inspection launch
 │   └── draxxmeasure.sqlite3       plus any SQLite WAL/SHM/journal sidecars
 └── reports/                      created on first report export
-    └── session-001.png           also CSVs, further PNG pages and manifest
+    └── session-001-part-405363-item-001.png  also a CSV and manifest per part
 ```
 
 Defaults are resolved with the executable's actual location, not the source
@@ -152,27 +154,27 @@ also exercise copied-executable isolation and data preservation on the host OS.
 
 ## Publish a release
 
-1. Review changes and ensure no production data is staged. Commit/push the source
-   and root workflow to your GitHub repository, with a configured `origin` remote.
-   Never stage unrelated sibling projects or inspection data from another checkout.
+1. Review changes and ensure no production data is staged. In the standalone
+   public repository, keep the workflow at the root `.github/workflows/`.
+   Commit/push the source and documentation with a configured `origin` remote.
 2. Set `[workspace.package].version` in `Cargo.toml` to the release version.
    Refresh/commit `Cargo.lock` with `cargo check --workspace` and run the tests.
-   For the current first release it is already `0.1.0`.
+   The current release version is `0.2.0`.
 3. From the Git repository root, tag the committed source and push the tag:
 
    ```text
-   git tag -a v0.1.0 -m "DraxxMeasure 0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.2.0 -m "DraxxMeasure 0.2.0"
+   git push origin v0.2.0
    ```
 
 4. Open **Actions → DraxxMeasure Windows portable**. Only after all checks and
    extracted-release verification succeed does the release job create
-   **DraxxMeasure v0.1.0**, with the ZIP and SHA-256 attached and generated notes.
+   **DraxxMeasure v0.2.0**, with the ZIP and SHA-256 attached and generated notes.
    The tag must match the CLI Cargo version exactly; mismatches fail before release.
    Prerelease versions such as `v0.2.0-rc.1` are marked prerelease.
 5. Download that release ZIP on the inspection PC and follow the first section.
 
 For later versions, update the workspace version/lockfile and use a **new immutable
-tag**, for example `v0.1.1`. Do not force-move tags or replace published assets.
+tag**, for example `v0.2.1`. Do not force-move tags or replace published assets.
 Re-running a job for an already published release deliberately refuses to overwrite
 it. No release is created for PRs, branch builds or manual checks without a tag push.

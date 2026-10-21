@@ -14,12 +14,15 @@ draxx-core.workspace = true
 draxx-storage.workspace = true
 draxx-application.workspace = true
 draxx-reporting.workspace = true
+ratatui.workspace = true
+crossterm.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 image.workspace = true
 serde_json.workspace = true
 csv.workspace = true
+rusqlite.workspace = true
 
 [lints]
 workspace = true

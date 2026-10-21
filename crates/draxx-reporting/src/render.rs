@@ -136,186 +136,153 @@ impl PngExporter for PlottersExporter {
                 "PNG pages need >=1400x1800 pixels and <=25 million pixels".into(),
             ));
         }
-        let count = input.snapshot.bundles.len().max(1).div_ceil(4);
-        let mut pages = Vec::new();
-        for page in 0..count {
-            let mut pixels = vec![255_u8; width as usize * height as usize * 3];
-            {
-                let root =
-                    BitMapBackend::with_buffer(&mut pixels, (width, height)).into_drawing_area();
-                drawing(root.fill(&WHITE))?;
-                let (header, body) = root.split_vertically(280);
-                text(&header, &input.configuration.title, 28, 36, 32)?;
-                let part = input.snapshot.specification.part_number().as_str();
-                let part_lines: Vec<String> = part
-                    .chars()
-                    .collect::<Vec<_>>()
-                    .chunks(85)
-                    .map(|c| c.iter().collect())
-                    .collect();
-                for (line, value) in part_lines.iter().take(2).enumerate() {
-                    text(
-                        &header,
-                        &format!(
-                            "Part Number{}: {value}",
-                            if line == 0 { "" } else { " (continued)" }
-                        ),
-                        28,
-                        76 + line as i32 * 26,
-                        24,
-                    )?;
-                }
-                if part_lines.len() > 2 {
-                    text(
-                        &header,
-                        "Part Number continued in exact CSV/manifest (too long for header)",
-                        28,
-                        125,
-                        18,
-                    )?;
-                }
-                let spec = &input.snapshot.specification;
+        let mut pixels = vec![255_u8; width as usize * height as usize * 3];
+        {
+            let root = BitMapBackend::with_buffer(&mut pixels, (width, height)).into_drawing_area();
+            drawing(root.fill(&WHITE))?;
+            let (header, body) = root.split_vertically(280);
+            text(&header, &input.configuration.title, 28, 36, 32)?;
+            let part = input.snapshot.specification.part_number().as_str();
+            let part_lines: Vec<String> = part
+                .chars()
+                .collect::<Vec<_>>()
+                .chunks(85)
+                .map(|c| c.iter().collect())
+                .collect();
+            for (line, value) in part_lines.iter().take(2).enumerate() {
                 text(
                     &header,
                     &format!(
-                        "Session {:03} | Item {} | Spec v{} | Nominal {} mm | LSL {} | USL {} | Resolution {} mm",
-                        input.snapshot.session.id().get(),
-                        input.snapshot.item.id(),
-                        spec.version(),
-                        spec.nominal(),
-                        spec.lsl(),
-                        spec.usl(),
-                        spec.resolution().length()
+                        "Part Number{}: {value}",
+                        if line == 0 { "" } else { " (continued)" }
                     ),
                     28,
-                    145,
-                    21,
+                    76 + line as i32 * 26,
+                    24,
                 )?;
+            }
+            if part_lines.len() > 2 {
                 text(
                     &header,
-                    &format!(
-                        "Generated {} | Revision {} | Part page {}/{} | Detail bundles {}-{} of {}",
-                        date(input.metadata.generated_at)?,
-                        input.snapshot.revision,
-                        page + 1,
-                        count,
-                        (page * 4 + 1).min(input.snapshot.bundles.len()),
-                        ((page + 1) * 4).min(input.snapshot.bundles.len()),
-                        input.snapshot.bundles.len()
-                    ),
+                    "Part Number continued in exact CSV/manifest (too long for header)",
                     28,
-                    178,
-                    20,
+                    125,
+                    18,
                 )?;
-                let summary = &input.statistics.overall;
-                text(
-                    &header,
-                    &format!(
-                        "Bundles {} | Measurements {} | Mean {} mm | Sample SD {} mm",
-                        input.statistics.bundle_count,
-                        summary.measurement_count,
-                        metric(&summary.mean_mm),
-                        metric(&summary.sample_standard_deviation_mm)
-                    ),
-                    28,
-                    212,
-                    21,
-                )?;
-                text(
-                    &header,
-                    &format!(
-                        "Min {} mm | Max {} mm | Median {} mm | OOS {} ({}%) | Invalidated {}",
-                        exact(&summary.minimum),
-                        exact(&summary.maximum),
-                        metric(&summary.median_mm),
-                        summary.out_of_specification_count,
-                        metric(&summary.out_of_specification_percentage),
-                        input.statistics.invalidated_count
-                    ),
-                    28,
-                    247,
-                    21,
-                )?;
-                let (histogram, body) = body.split_vertically(420);
-                histogram_chart(&histogram, input)?;
-                let (individuals, body) = body.split_vertically(height as i32 - 280 - 420 - 470);
-                let start = page * 4;
-                let end = ((page + 1) * 4).min(input.snapshot.bundles.len());
-                let selected = &input.snapshot.bundles[start.min(end)..end];
-                let grid = match selected.len() {
-                    0 | 1 => (1, 1),
-                    2 => (1, 2),
-                    _ => (2, 2),
-                };
-                let areas = individuals.split_evenly(grid);
-                if selected.is_empty() {
-                    text(
-                        &areas[0],
-                        "No bundles recorded; no measurements invented.",
-                        30,
-                        70,
-                        22,
-                    )?;
-                }
-                for (bundle, area) in selected.iter().zip(&areas) {
-                    individual_chart(area, input, bundle)?;
-                }
-                let (means, footer) = body.split_vertically(340);
-                means_chart(&means, input, start, end)?;
+            }
+            let spec = &input.snapshot.specification;
+            text(
+                &header,
+                &format!(
+                    "Session {:03} | Item {} | Spec v{} | Nominal {} mm | LSL {} | USL {} | Resolution {} mm",
+                    input.snapshot.session.id().get(),
+                    input.snapshot.item.id(),
+                    spec.version(),
+                    spec.nominal(),
+                    spec.lsl(),
+                    spec.usl(),
+                    spec.resolution().length()
+                ),
+                28,
+                145,
+                21,
+            )?;
+            text(
+                &header,
+                &format!(
+                    "Generated {} | Revision {} | Session state {:?} | All bundles combined",
+                    date(input.metadata.generated_at)?,
+                    input.snapshot.revision,
+                    input.snapshot.session.status()
+                ),
+                28,
+                178,
+                20,
+            )?;
+            let summary = &input.statistics.overall;
+            text(
+                &header,
+                &format!(
+                    "Bundles {} | Measurements {} | Mean {} mm | Sample SD {} mm",
+                    input.statistics.bundle_count,
+                    summary.measurement_count,
+                    metric(&summary.mean_mm),
+                    metric(&summary.sample_standard_deviation_mm)
+                ),
+                28,
+                212,
+                21,
+            )?;
+            text(
+                &header,
+                &format!(
+                    "Min {} mm | Max {} mm | Median {} mm | OOS {} ({}%) | Invalidated {}",
+                    exact(&summary.minimum),
+                    exact(&summary.maximum),
+                    metric(&summary.median_mm),
+                    summary.out_of_specification_count,
+                    metric(&summary.out_of_specification_percentage),
+                    input.statistics.invalidated_count
+                ),
+                28,
+                247,
+                21,
+            )?;
+            let (histogram, body) = body.split_vertically(420);
+            histogram_chart(&histogram, input)?;
+            let (individuals, body) = body.split_vertically(height as i32 - 280 - 420 - 470);
+            individual_chart(&individuals, input)?;
+            let (summary, footer) = body.split_vertically(340);
+            summary_panel(&summary, input)?;
+            text(
+                &footer,
+                "Observed measurements and descriptive statistics; specification limits are not statistical control limits.",
+                28,
+                28,
+                19,
+            )?;
+            text(
+                &footer,
+                "Simple inclusive LSL/USL decisions. Instrument/calibration/uncertainty unknown unless documented in CSV.",
+                28,
+                54,
+                19,
+            )?;
+            text(
+                &footer,
+                &format!(
+                    "Export {} | {} v{} | Software {} | Report v{} | Effective values; audit history retained in CSV.",
+                    input.metadata.export_id,
+                    input.statistics.algorithm,
+                    input.statistics.algorithm_version,
+                    input.metadata.software_version,
+                    input.metadata.report_format_version
+                ),
+                28,
+                80,
+                17,
+            )?;
+            if let Some(note) = input.metadata.notes.first() {
                 text(
                     &footer,
-                    "Observed points and min-max ranges; these are NOT statistical control limits or confidence intervals.",
+                    &note.chars().take(140).collect::<String>(),
                     28,
-                    28,
-                    19,
-                )?;
-                text(
-                    &footer,
-                    "Simple inclusive LSL/USL decisions. Instrument/calibration/uncertainty unknown unless documented in CSV.",
-                    28,
-                    54,
-                    19,
-                )?;
-                text(
-                    &footer,
-                    &format!(
-                        "Export {} | {} v{} | Software {} | Effective values; audit history retained in CSV.",
-                        input.metadata.export_id,
-                        input.statistics.algorithm,
-                        input.statistics.algorithm_version,
-                        input.metadata.software_version
-                    ),
-                    28,
-                    80,
+                    106,
                     17,
                 )?;
-                if let Some(note) = input.metadata.notes.first() {
-                    text(
-                        &footer,
-                        &note.chars().take(140).collect::<String>(),
-                        28,
-                        106,
-                        17,
-                    )?;
-                }
-                drawing(root.present())?;
             }
-            let image = image::RgbImage::from_raw(width, height, pixels)
-                .ok_or_else(|| ReportError::Rendering("invalid RGB buffer".into()))?;
-            let mut encoded = Cursor::new(Vec::new());
-            image::DynamicImage::ImageRgb8(image)
-                .write_to(&mut encoded, image::ImageFormat::Png)
-                .map_err(|e| ReportError::Rendering(e.to_string()))?;
-            pages.push(PngPage {
-                page_number: std::num::NonZeroU32::new(
-                    u32::try_from(page + 1)
-                        .map_err(|_| ReportError::Rendering("too many report pages".into()))?,
-                )
-                .ok_or_else(|| ReportError::Rendering("invalid page".into()))?,
-                bytes: encoded.into_inner(),
-            });
+            drawing(root.present())?;
         }
-        Ok(pages)
+        let image = image::RgbImage::from_raw(width, height, pixels)
+            .ok_or_else(|| ReportError::Rendering("invalid RGB buffer".into()))?;
+        let mut encoded = Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image)
+            .write_to(&mut encoded, image::ImageFormat::Png)
+            .map_err(|e| ReportError::Rendering(e.to_string()))?;
+        Ok(vec![PngPage {
+            page_number: std::num::NonZeroU32::MIN,
+            bytes: encoded.into_inner(),
+        }])
     }
 }
 
@@ -381,45 +348,63 @@ fn histogram_chart(area: &Area<'_>, input: &ReportInput<'_>) -> Result<(), Repor
     )?;
     Ok(())
 }
-fn individual_chart(
-    area: &Area<'_>,
-    input: &ReportInput<'_>,
-    bundle: &SnapshotBundle,
-) -> Result<(), ReportError> {
+/// Concatenate original capture positions across bundles, retaining invalidated gaps.
+struct CapturePositions<'a> {
+    last: i64,
+    measurements: Vec<(i64, &'a MeasurementHistory)>,
+}
+
+fn capture_positions(snapshot: &InspectionSnapshot) -> Result<CapturePositions<'_>, ReportError> {
+    let mut offset = 0_i64;
+    let mut positions = Vec::new();
+    for bundle in &snapshot.bundles {
+        for history in &bundle.measurements {
+            let position = offset
+                .checked_add(history.original().sequence().get())
+                .ok_or_else(|| {
+                    ReportError::InvalidConfiguration("too many capture positions".into())
+                })?;
+            positions.push((position, history));
+        }
+        offset = offset
+            .checked_add(
+                bundle
+                    .measurements
+                    .last()
+                    .map_or(0, |history| history.original().sequence().get()),
+            )
+            .ok_or_else(|| {
+                ReportError::InvalidConfiguration("too many capture positions".into())
+            })?;
+    }
+    Ok(CapturePositions {
+        last: offset.max(1),
+        measurements: positions,
+    })
+}
+
+fn individual_chart(area: &Area<'_>, input: &ReportInput<'_>) -> Result<(), ReportError> {
     let (low, high) = bounds(input);
-    let last = bundle
-        .measurements
-        .last()
-        .map_or(1, |m| m.original().sequence().get());
-    let active = bundle
-        .measurements
-        .iter()
-        .filter(|m| m.effective().is_some())
-        .count();
+    let positions = capture_positions(input.snapshot)?;
+    let last = positions.last;
     let mut chart = drawing(
         ChartBuilder::on(area)
             .caption(
-                format!(
-                    "Bundle #{} (ID {}) - {} active",
-                    bundle.bundle.sequence(),
-                    bundle.bundle.id(),
-                    active
-                ),
-                ("sans-serif", 21),
+                "Individual measurements - entire Part Number/specification",
+                ("sans-serif", 24),
             )
             .margin(20)
-            .x_label_area_size(48)
-            .y_label_area_size(95)
+            .x_label_area_size(60)
+            .y_label_area_size(110)
             .build_cartesian_2d(0.0..last as f64 + 1.0, low..high),
     )?;
     drawing(
         chart
             .configure_mesh()
-            .x_desc("Original capture sequence (gaps retained)")
+            .x_desc("Capture position across all bundles (retracted positions retained)")
             .y_desc("Length (mm)")
-            .axis_desc_style(("sans-serif", 17))
-            .label_style(("sans-serif", 17))
-            .x_labels(7)
+            .axis_desc_style(("sans-serif", 20))
+            .label_style(("sans-serif", 18))
             .draw(),
     )?;
     for (value, color) in [
@@ -433,93 +418,91 @@ fn individual_chart(
         )))?;
     }
     drawing(
-        chart.draw_series(bundle.measurements.iter().filter_map(|m| {
-            m.effective().map(|(_, v)| {
-                let color = if input.snapshot.specification.classify(v.value)
-                    == Conformance::WithinLimits
-                {
-                    BLUE
-                } else {
-                    RED
-                };
-                Circle::new(
-                    (m.original().sequence().get() as f64, mm(v.value)),
-                    4,
-                    color.filled(),
-                )
-            })
-        })),
+        chart.draw_series(
+            positions
+                .measurements
+                .into_iter()
+                .filter_map(|(position, history)| {
+                    history.effective().map(|(_, value)| {
+                        let color = if input.snapshot.specification.classify(value.value)
+                            == Conformance::WithinLimits
+                        {
+                            BLUE
+                        } else {
+                            RED
+                        };
+                        Circle::new((position as f64, mm(value.value)), 4, color.filled())
+                    })
+                }),
+        ),
     )?;
     Ok(())
 }
-fn means_chart(
-    area: &Area<'_>,
-    input: &ReportInput<'_>,
-    start: usize,
-    end: usize,
-) -> Result<(), ReportError> {
-    let (low, high) = bounds(input);
-    let selected = &input.snapshot.bundles[start.min(end)..end];
-    let x_low = selected
-        .first()
-        .map_or(0.5, |b| b.bundle.sequence().get() as f64 - 0.5);
-    let x_high = selected
-        .last()
-        .map_or(1.5, |b| b.bundle.sequence().get() as f64 + 0.5);
-    let mut chart = drawing(
-        ChartBuilder::on(area)
-            .caption(
-                "Bundle means and observed min-max ranges - detail bundles on this page",
-                ("sans-serif", 23),
-            )
-            .margin(18)
-            .x_label_area_size(45)
-            .y_label_area_size(95)
-            .build_cartesian_2d(x_low..x_high, low..high),
+
+fn summary_panel(area: &Area<'_>, input: &ReportInput<'_>) -> Result<(), ReportError> {
+    let summary = &input.statistics.overall;
+    text(
+        area,
+        "Part Number summary - all bundles combined",
+        28,
+        34,
+        26,
     )?;
-    drawing(
-        chart
-            .configure_mesh()
-            .x_desc("Bundle sequence")
-            .y_desc("Length (mm)")
-            .axis_desc_style(("sans-serif", 19))
-            .label_style(("sans-serif", 18))
-            .x_labels(4)
-            .draw(),
-    )?;
-    for (value, color) in [
-        (input.snapshot.specification.nominal(), GREEN),
-        (input.snapshot.specification.lsl(), RED),
-        (input.snapshot.specification.usl(), RED),
+    for (y, line) in [
+        (
+            85,
+            format!(
+                "Mean {} mm | Median {} mm | Sample SD {} mm",
+                metric(&summary.mean_mm),
+                metric(&summary.median_mm),
+                metric(&summary.sample_standard_deviation_mm)
+            ),
+        ),
+        (
+            130,
+            format!(
+                "Minimum {} mm | Maximum {} mm | Range {} mm",
+                exact(&summary.minimum),
+                exact(&summary.maximum),
+                exact(&summary.range)
+            ),
+        ),
+        (
+            175,
+            format!(
+                "Signed mean deviation from nominal: {} mm",
+                metric(&summary.mean_deviation_mm)
+            ),
+        ),
+        (
+            220,
+            format!(
+                "Below LSL {} | Above USL {} | Total out of specification {} ({}%)",
+                summary.below_specification_count,
+                summary.above_specification_count,
+                summary.out_of_specification_count,
+                metric(&summary.out_of_specification_percentage)
+            ),
+        ),
+        (
+            265,
+            format!(
+                "Effective observations {} | Invalidated {} | Source bundles {}",
+                summary.measurement_count,
+                input.statistics.invalidated_count,
+                input.statistics.bundle_count
+            ),
+        ),
     ] {
-        drawing(chart.draw_series(LineSeries::new(
-            [(x_low, mm(value)), (x_high, mm(value))],
-            color.stroke_width(1),
-        )))?;
+        text(area, &line, 28, y, 22)?;
     }
-    for (index, bundle) in input.statistics.bundles[start.min(end)..end]
-        .iter()
-        .enumerate()
-    {
-        let summary = &bundle.summary;
-        let x = selected[index].bundle.sequence().get() as f64;
-        if let (Statistic::Available(mean), Statistic::Available(min), Statistic::Available(max)) =
-            (&summary.mean_mm, &summary.minimum, &summary.maximum)
-        {
-            drawing(chart.draw_series([
-                PathElement::new(vec![(x, mm(*min)), (x, mm(*max))], BLUE.stroke_width(3)),
-                PathElement::new(
-                    vec![(x - 0.08, mm(*min)), (x + 0.08, mm(*min))],
-                    BLUE.stroke_width(2),
-                ),
-                PathElement::new(
-                    vec![(x - 0.08, mm(*max)), (x + 0.08, mm(*max))],
-                    BLUE.stroke_width(2),
-                ),
-            ]))?;
-            drawing(chart.draw_series([Circle::new((x, *mean), 6, INK.filled())]))?;
-        }
-    }
+    text(
+        area,
+        "All effective points included; coincident points may overlap. Exact observations and bundle provenance are in CSV.",
+        28,
+        310,
+        18,
+    )?;
     Ok(())
 }
 
@@ -558,4 +541,104 @@ pub(crate) fn empty_session(session: SessionId, at: UnixMillis) -> Result<Vec<u8
         .write_to(&mut output, image::ImageFormat::Png)
         .map_err(|e| ReportError::Rendering(e.to_string()))?;
     Ok(output.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combined_capture_positions_preserve_retractions_and_continue_across_bundles() {
+        let length = |value| Length::parse_mm(value).unwrap();
+        let session = InspectionSession::new(SessionId::new(1).unwrap(), UnixMillis(0));
+        let spec = PartSpecification::new(
+            SpecificationId::new(1).unwrap(),
+            PartNumber::new("SYNTHETIC".into()).unwrap(),
+            SpecificationVersion::new(1).unwrap(),
+            length("10"),
+            length("9"),
+            length("11"),
+            Resolution::new(length("0.1")).unwrap(),
+        )
+        .unwrap();
+        let item = InspectionItem::new(InspectionItemId::new(1).unwrap(), &session, &spec).unwrap();
+        let mut bundles = Vec::new();
+        let mut id = 0;
+        for (bundle_id, count) in [(1, 3), (2, 1)] {
+            let bundle = Bundle::start(
+                BundleId::new(bundle_id).unwrap(),
+                &session,
+                &item,
+                Sequence::new(bundle_id).unwrap(),
+                "Synthetic bundle".into(),
+                UnixMillis(0),
+            )
+            .unwrap();
+            let context = CaptureContext {
+                session: &session,
+                item: &item,
+                bundle: &bundle,
+                specification: &spec,
+            };
+            let mut measurements = Vec::new();
+            for sequence in 1..=count {
+                id += 1;
+                let original = Measurement::new(
+                    &context,
+                    MeasurementDraft {
+                        id: MeasurementId::new(id).unwrap(),
+                        sequence: Sequence::new(sequence).unwrap(),
+                        input: MeasurementInput::full_length("=10".into()).unwrap(),
+                        interpreted: InterpretedMeasurement {
+                            value: length("10"),
+                            method: InterpretationMethod::FullLength,
+                        },
+                        captured_at: UnixMillis(0),
+                        provenance: MeasurementProvenance::default(),
+                    },
+                )
+                .unwrap();
+                let corrections = if id == 2 {
+                    vec![
+                        MeasurementCorrection::new(
+                            CorrectionId::new(1).unwrap(),
+                            &original,
+                            &spec,
+                            None,
+                            CorrectionDraft {
+                                action: CorrectionAction::Invalidate,
+                                reason: "Synthetic invalidation".into(),
+                                actor: None,
+                                recorded_at: UnixMillis(1),
+                            },
+                        )
+                        .unwrap(),
+                    ]
+                } else {
+                    Vec::new()
+                };
+                measurements.push(MeasurementHistory::new(original, corrections).unwrap());
+            }
+            bundles.push(SnapshotBundle {
+                bundle,
+                measurements,
+            });
+        }
+        let snapshot = InspectionSnapshot {
+            revision: SnapshotRevision::new(1).unwrap(),
+            session,
+            item,
+            specification: spec,
+            bundles,
+        };
+        snapshot.validate().unwrap();
+        let positions = capture_positions(&snapshot).unwrap();
+        assert_eq!(positions.last, 4);
+        let effective: Vec<_> = positions
+            .measurements
+            .into_iter()
+            .filter_map(|(position, history)| history.effective().map(|_| position))
+            .collect();
+        assert_eq!(effective, vec![1, 3, 4]);
+    }
 }

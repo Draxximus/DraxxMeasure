@@ -1,7 +1,10 @@
-//! Line-oriented portable adapter. Domain, transactions, and calculations stay in libraries.
+//! Portable line and Ratatui adapters. Domain, transactions, and calculations stay in libraries.
+pub mod bundle_view;
+mod screen;
 use draxx_application::*;
 use draxx_core::*;
 use draxx_storage::*;
+pub use screen::run_screen;
 use std::{
     error::Error,
     fs,
@@ -52,7 +55,19 @@ impl CliOptions {
     }
 }
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
-const COMMANDS: &str = "Commands:\n  /session                   Start an inspection session (root only)\n  /sessions                  List session IDs and states\n  /resume ID                 Recover a saved active/suspended session\n  /partnumber [CODE]         Create or reselect a Part Number (session level)\n  /bundle                    Start a bundle (Part Number level)\n  /close                     Close only the current bundle / Part Number / session\n  /status                    Show current specification and capacity\n  /measurements              List current bundle IDs, sequences and effective values\n  /undo                      Confirm invalidation of last active measurement\n  /correct SEQUENCE VALUE    Replace/restore a specific entry, with a reason\n  /policy LOWER UPPER        Explicitly approve a new abbreviation interval (mm)\n  /policy off                Require full-length input\n  /retry                     Retry a pending storage write with the SAME request ID\n  /report [SESSION_ID]       Retry PNG/CSV export of a closed session\n  /exit                      Leave committed context recoverable; do not close it\nInside a bundle: two digits + Enter, or =full_length + Enter. No per-measurement command.\nDuring setup prompts: /cancel cancels setup. No rows are saved for invalid/ambiguous input.";
+
+/// Presentation hooks shared by the line interface and terminal screen.
+trait CliObserver {
+    fn inline_bundle(&self) -> bool {
+        true
+    }
+    fn state(&mut self, _service: &InspectionService<SqliteStore>) -> Result<()> {
+        Ok(())
+    }
+    fn rejected(&mut self) {}
+}
+impl CliObserver for () {}
+const COMMANDS: &str = "Commands:\n  /session                   Start an inspection session (root only)\n  /sessions                  List session IDs and states\n  /resume ID                 Recover a saved active/suspended session\n  /partnumber [CODE]         Create or reselect a Part Number (session level)\n  /bundle                    Start a bundle (Part Number level)\n  /close                     Close only the current bundle / Part Number / session\n  /status                    Show current specification and capacity\n  /measurements              List current bundle IDs, sequences and effective values\n  /undo                      Confirm invalidation of last active measurement\n  /correct SEQUENCE VALUE    Replace/restore a specific entry, with a reason\n  /policy LOWER UPPER        Explicitly approve a new abbreviation interval (mm)\n  /policy off                Require full-length input\n  /retry                     Retry a pending storage write with the SAME request ID\n  /report                    Retry the last closed Part Number report\n  /report part ITEM_ID        Export/retry one Part Number with closed bundles\n  /report SESSION_ID          Export all parts of a closed session\n  /exit                      Leave committed context recoverable; do not close it\nInside a bundle: two digits + Enter, or =full_length + Enter. No per-measurement command.\nDuring setup prompts: /cancel cancels setup. No rows are saved for invalid/ambiguous input.";
 
 fn line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
     let mut value = String::new();
@@ -74,6 +89,7 @@ fn line(reader: &mut impl BufRead) -> io::Result<Option<String>> {
 fn ask<T>(
     reader: &mut impl BufRead,
     writer: &mut impl Write,
+    observer: &mut impl CliObserver,
     label: &str,
     parse: impl Fn(String) -> Result<T>,
 ) -> Result<Option<T>> {
@@ -92,10 +108,13 @@ fn ask<T>(
         }
         match parse(raw) {
             Ok(value) => return Ok(Some(value)),
-            Err(error) => writeln!(
-                writer,
-                "Invalid input: {error}. Correct this field or use /cancel."
-            )?,
+            Err(error) => {
+                observer.rejected();
+                writeln!(
+                    writer,
+                    "Invalid input: {error}. Correct this field or use /cancel."
+                )?;
+            }
         }
     }
 }
@@ -198,6 +217,7 @@ fn setup_part(
     code: Option<&str>,
     reader: &mut impl BufRead,
     writer: &mut impl Write,
+    observer: &mut impl CliObserver,
 ) -> Result<()> {
     let state = service.state()?.ok_or("start /session first")?;
     if state.item.is_some() || state.bundle.is_some() {
@@ -206,7 +226,7 @@ fn setup_part(
     let part = if let Some(code) = code {
         PartNumber::new(code.into())?
     } else {
-        let Some(part) = ask(reader, writer, "Part Number: ", |raw| {
+        let Some(part) = ask(reader, writer, observer, "Part Number: ", |raw| {
             Ok(PartNumber::new(raw)?)
         })?
         else {
@@ -220,13 +240,13 @@ fn setup_part(
         show_status(service, writer)?;
         return Ok(());
     }
-    let Some(nominal) = ask(reader, writer, "Nominal length (mm): ", |raw| {
+    let Some(nominal) = ask(reader, writer, observer, "Nominal length (mm): ", |raw| {
         Ok(Length::parse_mm(&raw)?)
     })?
     else {
         return Ok(());
     };
-    let Some(tolerance) = ask(reader, writer, "Tolerance (±mm): ", |raw| {
+    let Some(tolerance) = ask(reader, writer, observer, "Tolerance (±mm): ", |raw| {
         let value = Length::parse_mm(&raw)?;
         PartSpecification::symmetric_limits(nominal, value)?;
         Ok(value)
@@ -237,6 +257,7 @@ fn setup_part(
     let Some(resolution) = ask(
         reader,
         writer,
+        observer,
         "Instrument resolution (mm; explicit, not inferred from nominal): ",
         |raw| Ok(Resolution::new(Length::parse_mm(&raw)?)?),
     )?
@@ -251,7 +272,7 @@ fn setup_part(
     } else {
         "Enter approved abbreviation LOWER UPPER bounds in mm, or off: ".into()
     };
-    let Some(policy) = ask(reader, writer, &label, |raw| {
+    let Some(policy) = ask(reader, writer, observer, &label, |raw| {
         if raw == "off" {
             return Ok(None);
         }
@@ -337,6 +358,26 @@ fn report(
         now()?,
         &config.report_notes,
     )?;
+    show_export(exported, writer)
+}
+
+fn report_part(
+    service: &InspectionService<SqliteStore>,
+    item: InspectionItemId,
+    config: &CliOptions,
+    writer: &mut impl Write,
+) -> Result<()> {
+    let snapshot = service.store().snapshot(item)?;
+    let exported = draxx_reporting::export_part(
+        &snapshot,
+        &config.reports_directory,
+        now()?,
+        &config.report_notes,
+    )?;
+    show_export(exported, writer)
+}
+
+fn show_export(exported: draxx_reporting::ExportedReport, writer: &mut impl Write) -> Result<()> {
     writeln!(
         writer,
         "✓ PNG report generated ({} page(s)); verification CSV exported",
@@ -353,6 +394,15 @@ fn report(
 }
 
 pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Write) -> Result<()> {
+    run_observed(config, reader, writer, &mut ())
+}
+
+fn run_observed(
+    config: CliOptions,
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    observer: &mut impl CliObserver,
+) -> Result<()> {
     if let Some(parent) = config
         .database
         .parent()
@@ -381,7 +431,31 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
             session.id()
         )?;
     }
+    let mut displayed_bundle = None;
+    let mut last_report_item = None;
     loop {
+        observer.state(&service)?;
+        if observer.inline_bundle() {
+            let state = service.state()?;
+            if let Some(state) = state
+                && let Some(bundle) = state.bundle
+            {
+                let identity = (bundle.id(), state.active_count);
+                if displayed_bundle != Some(identity) {
+                    writeln!(
+                        writer,
+                        "\n{}",
+                        bundle_view::render_bundle(
+                            bundle.sequence(),
+                            BundleCapacity::new(state.active_count)?
+                        )
+                    )?;
+                    displayed_bundle = Some(identity);
+                }
+            } else {
+                displayed_bundle = None;
+            }
+        }
         write!(writer, "{}", prompt(&service)?)?;
         writer.flush()?;
         let Some(raw) = line(reader)? else {
@@ -436,8 +510,10 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
                     writeln!(writer, "✓ Session recovered from committed data")?;
                     show_status(&service, writer)?;
                 }
-                ["/partnumber"] => setup_part(&mut service, None, reader, writer)?,
-                ["/partnumber", code] => setup_part(&mut service, Some(code), reader, writer)?,
+                ["/partnumber"] => setup_part(&mut service, None, reader, writer, observer)?,
+                ["/partnumber", code] => {
+                    setup_part(&mut service, Some(code), reader, writer, observer)?
+                }
                 ["/bundle"] => {
                     let bundle = service.start_bundle()?;
                     writeln!(
@@ -464,26 +540,40 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
                         item,
                         bundles,
                         measurements,
-                    } => writeln!(
-                        writer,
-                        "✓ Part Number {} closed\nBundles: {bundles}\nMeasurements: {measurements}",
-                        escaped(item.part_number().as_str())
-                    )?,
-                    ClosedContext::Session(id) => {
-                        writeln!(writer, "✓ Session closed (ID {id})")?;
-                        if let Err(error) = report(&service, id, &config, writer) {
+                    } => {
+                        writeln!(
+                            writer,
+                            "✓ Part Number {} closed\nBundles: {bundles}\nMeasurements: {measurements}",
+                            escaped(item.part_number().as_str())
+                        )?;
+                        last_report_item = Some(item.id());
+                        if let Err(error) = report_part(&service, item.id(), &config, writer) {
                             writeln!(
                                 writer,
-                                "Report failed: {error}. Session remains closed and all inspection data is preserved.\nRetry with /report {id} (or restart with a writable --reports-dir)."
+                                "Report failed: {error}. Part Number context remains closed and all inspection data is preserved.\nRetry with /report part {} (or restart with a writable --reports-dir).",
+                                item.id()
                             )?;
                         }
                     }
+                    ClosedContext::Session(id) => writeln!(writer, "✓ Session closed (ID {id})")?,
                 },
+                ["/report"] if last_report_item.is_some() => report_part(
+                    &service,
+                    last_report_item.ok_or("no closed Part Number")?,
+                    &config,
+                    writer,
+                )?,
+                ["/report", "part", id] => report_part(
+                    &service,
+                    InspectionItemId::new(id.parse()?)?,
+                    &config,
+                    writer,
+                )?,
                 ["/report"] => report(
                     &service,
-                    service
-                        .last_closed()
-                        .ok_or("specify /report SESSION_ID for a previously closed session")?,
+                    service.last_closed().ok_or(
+                        "specify /report part ITEM_ID or /report SESSION_ID after restart",
+                    )?,
                     &config,
                     writer,
                 )?,
@@ -544,20 +634,25 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
                             .1
                             .value
                     );
-                    if ask(reader, writer, &label, |raw| match raw.as_str() {
+                    if ask(reader, writer, observer, &label, |raw| match raw.as_str() {
                         "yes" => Ok(true),
                         "no" => Ok(false),
                         _ => Err("enter yes or no".into()),
                     })? == Some(true)
                     {
-                        let Some(reason) =
-                            ask(reader, writer, "Reason (Enter = Operator undo): ", |raw| {
+                        let Some(reason) = ask(
+                            reader,
+                            writer,
+                            observer,
+                            "Reason (Enter = Operator undo): ",
+                            |raw| {
                                 Ok(if raw.is_empty() {
                                     "Operator undo confirmed in CLI".into()
                                 } else {
                                     raw
                                 })
-                            })?
+                            },
+                        )?
                         else {
                             return Ok(());
                         };
@@ -579,13 +674,14 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
                         target.original().id(),
                         escaped(target.original().input().raw())
                     )?;
-                    let Some(reason) = ask(reader, writer, "Correction reason: ", |raw| {
-                        if raw.trim().is_empty() {
-                            Err("reason is required".into())
-                        } else {
-                            Ok(raw)
-                        }
-                    })?
+                    let Some(reason) =
+                        ask(reader, writer, observer, "Correction reason: ", |raw| {
+                            if raw.trim().is_empty() {
+                                Err("reason is required".into())
+                            } else {
+                                Ok(raw)
+                            }
+                        })?
                     else {
                         return Ok(());
                     };
@@ -602,6 +698,7 @@ pub fn run(config: CliOptions, reader: &mut impl BufRead, writer: &mut impl Writ
             Ok(())
         })();
         if let Err(error) = result {
+            observer.rejected();
             writeln!(
                 writer,
                 "Error: {error}\nNot acknowledged as saved: {}",

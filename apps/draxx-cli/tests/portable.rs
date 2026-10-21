@@ -93,7 +93,7 @@ fn copied_executable_captures_and_reports_without_the_workspace_and_update_prese
     );
     assert!(output.contains("PNG report generated"));
     let database = app.join("data/draxxmeasure.sqlite3");
-    let report = app.join("reports/session-001.png");
+    let report = app.join("reports/session-001-part-405363-item-001.png");
     assert!(database.is_file());
     assert_eq!(image::open(&report).unwrap().width(), 1800);
     assert!(!unrelated.join("data").exists());

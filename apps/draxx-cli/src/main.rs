@@ -1,9 +1,22 @@
-use draxx_cli::{CliOptions, run};
-use std::{env, ffi::OsString, path::PathBuf, process::ExitCode};
+use draxx_cli::{CliOptions, run, run_screen};
+use std::{env, ffi::OsString, io::IsTerminal, path::PathBuf, process::ExitCode};
 
-const HELP: &str = "DraxxMeasure - local-first dimensional inspection\n\nUsage: draxxmeasure [--data-dir DIR] [--database PATH] [--reports-dir PATH] [--report-note TEXT]\n       draxxmeasure --help | --version\n\nNo arguments start interactive capture. Type /help for commands.\nEach bundle holds at most 42 active measurements; /close is explicit.\nPortable defaults beside the executable: data/draxxmeasure.sqlite3 and reports/\n--data-dir DIR places the database in DIR and reports in DIR/reports.\n--database and --reports-dir override their individual paths, regardless of option order.\nExplicit relative paths are relative to the current working directory.\nUse a writable local folder; no administrator access or workspace is required.\nEOF, Ctrl+C, or /exit leave committed sessions recoverable with /resume ID.";
+const HELP: &str = "DraxxMeasure - local-first dimensional inspection\n\nUsage: draxxmeasure [--tui | --line] [--data-dir DIR] [--database PATH] [--reports-dir PATH] [--report-note TEXT]\n       draxxmeasure --help | --version\n\nInteractive terminals open the Ratatui screen. Redirected input/output use the line interface.\n--tui requires an interactive terminal; --line always uses plain line input.\nScreen: Enter submits; F1 toggles help; Ctrl+C exits with committed context recoverable.\nType /help for commands. Each bundle holds at most 42 active measurements; /close is explicit.\nPortable defaults beside the executable: data/draxxmeasure.sqlite3 and reports/\n--data-dir DIR places the database in DIR and reports in DIR/reports.\n--database and --reports-dir override their individual paths, regardless of option order.\nExplicit relative paths are relative to the current working directory.\nUse a writable local folder; no administrator access or workspace is required.\nEOF, Ctrl+C, or /exit leave committed sessions recoverable with /resume ID.";
 
-fn options(arguments: Vec<OsString>) -> Result<Option<CliOptions>, String> {
+#[derive(Clone, Copy, Default)]
+enum Interface {
+    #[default]
+    Auto,
+    Line,
+    Screen,
+}
+
+struct LaunchOptions {
+    config: CliOptions,
+    interface: Interface,
+}
+
+fn options(arguments: Vec<OsString>) -> Result<Option<LaunchOptions>, String> {
     if arguments.len() == 1 && (arguments[0] == "--help" || arguments[0] == "-h") {
         println!("{HELP}");
         return Ok(None);
@@ -16,8 +29,20 @@ fn options(arguments: Vec<OsString>) -> Result<Option<CliOptions>, String> {
     let mut database = None;
     let mut reports_directory = None;
     let mut report_notes = Vec::new();
+    let mut interface = Interface::Auto;
     let mut arguments = arguments.into_iter();
     while let Some(flag) = arguments.next() {
+        if flag == "--tui" || flag == "--line" {
+            if !matches!(interface, Interface::Auto) {
+                return Err("Specify only one of --tui or --line".into());
+            }
+            interface = if flag == "--tui" {
+                Interface::Screen
+            } else {
+                Interface::Line
+            };
+            continue;
+        }
         if flag != "--data-dir"
             && flag != "--database"
             && flag != "--reports-dir"
@@ -58,10 +83,10 @@ fn options(arguments: Vec<OsString>) -> Result<Option<CliOptions>, String> {
         config.reports_directory = path;
     }
     config.report_notes = report_notes;
-    Ok(Some(config))
+    Ok(Some(LaunchOptions { config, interface }))
 }
 fn main() -> ExitCode {
-    let config = match options(env::args_os().skip(1).collect()) {
+    let launch = match options(env::args_os().skip(1).collect()) {
         Ok(Some(config)) => config,
         Ok(None) => return ExitCode::SUCCESS,
         Err(message) => {
@@ -69,11 +94,19 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match run(
-        config,
-        &mut std::io::stdin().lock(),
-        &mut std::io::stdout().lock(),
-    ) {
+    let interactive = std::io::stdin().is_terminal()
+        && std::io::stdout().is_terminal()
+        && env::var_os("TERM").is_none_or(|term| term != "dumb");
+    let result = match launch.interface {
+        Interface::Screen => run_screen(launch.config),
+        Interface::Auto if interactive => run_screen(launch.config),
+        _ => run(
+            launch.config,
+            &mut std::io::stdin().lock(),
+            &mut std::io::stdout().lock(),
+        ),
+    };
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("DraxxMeasure stopped: {error}. Existing inspection data was not reset.");
@@ -111,7 +144,8 @@ mod tests {
         ] {
             let config = options(arguments.into_iter().map(OsString::from).collect())
                 .unwrap()
-                .unwrap();
+                .unwrap()
+                .config;
             assert_eq!(config.database, PathBuf::from("existing.sqlite3"));
             assert_eq!(config.reports_directory, PathBuf::from("existing-reports"));
         }
@@ -123,5 +157,24 @@ mod tests {
             assert!(options(vec![flag.into()]).is_err());
             assert!(options(vec![flag.into(), "".into()]).is_err());
         }
+    }
+
+    #[test]
+    fn interface_flags_are_valueless_and_mutually_exclusive() {
+        for (flag, expected_screen) in [("--tui", true), ("--line", false)] {
+            let launch = options(vec![flag.into(), "--data-dir".into(), "chosen".into()])
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                matches!(launch.interface, Interface::Screen),
+                expected_screen
+            );
+            assert_eq!(
+                launch.config.database,
+                PathBuf::from("chosen/draxxmeasure.sqlite3")
+            );
+        }
+        assert!(options(vec!["--tui".into(), "--line".into()]).is_err());
+        assert!(options(vec!["--line".into(), "--tui".into()]).is_err());
     }
 }

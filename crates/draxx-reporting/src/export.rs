@@ -283,19 +283,91 @@ pub fn export_session(
     generated_at: UnixMillis,
     notes: &[String],
 ) -> Result<ExportedReport, ReportError> {
+    if snapshots
+        .iter()
+        .any(|snapshot| snapshot.session.status() != SessionStatus::Closed)
+    {
+        return Err(ReportError::InvalidConfiguration(
+            "close the session before exporting a session report".into(),
+        ));
+    }
+    export_set(session, snapshots, directory, generated_at, notes, None)
+}
+
+/// Export one Part Number after its bundles close, while its session may remain active.
+/// Later captures or retries produce a new export and never replace this snapshot.
+pub fn export_part(
+    snapshot: &InspectionSnapshot,
+    directory: &Path,
+    generated_at: UnixMillis,
+    notes: &[String],
+) -> Result<ExportedReport, ReportError> {
+    export_set(
+        snapshot.session.id(),
+        std::slice::from_ref(snapshot),
+        directory,
+        generated_at,
+        notes,
+        Some(snapshot.item.id()),
+    )
+}
+
+fn part_stem(snapshot: &InspectionSnapshot) -> String {
+    let slug: String = snapshot
+        .specification
+        .part_number()
+        .as_str()
+        .chars()
+        .take(48)
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    format!("part-{slug}-item-{:03}", snapshot.item.id().get())
+}
+
+fn export_set(
+    session: SessionId,
+    snapshots: &[InspectionSnapshot],
+    directory: &Path,
+    generated_at: UnixMillis,
+    notes: &[String],
+    part: Option<InspectionItemId>,
+) -> Result<ExportedReport, ReportError> {
     let reference = snapshots.first().map(|s| s.revision);
+    if let Some(item) = part
+        && (snapshots.len() != 1
+            || snapshots
+                .first()
+                .is_none_or(|snapshot| snapshot.item.id() != item))
+    {
+        return Err(ReportError::SnapshotMismatch);
+    }
     for snapshot in snapshots {
         snapshot.validate().map_err(ReportError::InvalidSnapshot)?;
-        if snapshot.session.id() != session
-            || Some(snapshot.revision) != reference
-            || snapshot.session.status() != SessionStatus::Closed
-        {
+        if snapshot.session.id() != session || Some(snapshot.revision) != reference {
             return Err(ReportError::SnapshotMismatch);
+        }
+        if snapshot
+            .bundles
+            .iter()
+            .any(|bundle| bundle.bundle.status() != BundleStatus::Closed)
+        {
+            return Err(ReportError::InvalidConfiguration(
+                "close all bundles for this Part Number before exporting its report".into(),
+            ));
         }
     }
     fs::create_dir_all(directory).map_err(ReportError::Io)?;
     let export_id = uuid::Uuid::new_v4().to_string();
     let mut stem = format!("session-{:03}", session.get());
+    if part.is_some() {
+        stem.push_str(&format!("-{}", part_stem(&snapshots[0])));
+    }
     // Includes incomplete crash leftovers: retries do not silently replace them.
     let prefix = format!("{stem}.");
     let page_prefix = format!("{stem}-");
@@ -316,7 +388,7 @@ pub fn export_session(
         export_id: export_id.clone(),
         generated_at,
         software_version: env!("CARGO_PKG_VERSION").into(),
-        report_format_version: "1".into(),
+        report_format_version: "2".into(),
         notes: notes.to_vec(),
     };
     let configuration = ReportConfiguration {
@@ -332,6 +404,11 @@ pub fn export_session(
     let mut csv_files = Vec::new();
     let mut items = Vec::new();
     for snapshot in snapshots {
+        let item_stem = if part.is_some() {
+            stem.clone()
+        } else {
+            format!("{stem}-{}", part_stem(snapshot))
+        };
         let statistics = DescriptiveEngine
             .analyze(snapshot)
             .map_err(|e| ReportError::Rendering(e.to_string()))?;
@@ -350,23 +427,25 @@ pub fn export_session(
             configuration: &configuration,
         };
         for page in PlottersExporter.render(&input)? {
-            let page_number = png_files.len() + 1;
-            let name = if page_number == 1 {
-                format!("{stem}.png")
-            } else {
-                format!("{stem}-page-{page_number:03}.png")
-            };
+            let name = format!("{item_stem}.png");
             let path = directory.join(name);
             png_files.push(path.clone());
             files.push((path, page.bytes));
         }
         let mut csv = Vec::new();
         VerificationCsv.write(&input, &mut csv)?;
-        let path = directory.join(format!("{stem}-item-{:03}.csv", snapshot.item.id().get()));
+        let path = directory.join(format!("{item_stem}.csv"));
         csv_files.push(path.clone());
         files.push((path, csv));
         let summary = &statistics.overall;
-        items.push(json!({"item_id":snapshot.item.id().get(),"part_number":snapshot.specification.part_number().as_str(),"specification_id":snapshot.specification.id().get(),"specification_version":snapshot.specification.version().get(),"nominal_mm":snapshot.specification.nominal().to_string(),"lsl_mm":snapshot.specification.lsl().to_string(),"usl_mm":snapshot.specification.usl().to_string(),"resolution_mm":snapshot.specification.resolution().length().to_string(),"bundle_count":statistics.bundle_count,"measurement_count":summary.measurement_count,"invalidated_count":statistics.invalidated_count,"mean_mm":statistic(&summary.mean_mm),"median_mm":statistic(&summary.median_mm),"sample_standard_deviation_mm":statistic(&summary.sample_standard_deviation_mm),"out_of_specification_count":summary.out_of_specification_count,"out_of_specification_percentage":statistic(&summary.out_of_specification_percentage),"algorithm":statistics.algorithm,"algorithm_version":statistics.algorithm_version,"histogram_edges_nm":histogram.edges.as_slice().iter().map(|l|l.nanometres()).collect::<Vec<_>>(),"histogram_counts":histogram.counts,"capture_start_utc":date(snapshot.session.created_at())?,"session_closed_utc":snapshot.session.closed_at().map(date).transpose()?}));
+        let capture_times = snapshot
+            .bundles
+            .iter()
+            .flat_map(|bundle| &bundle.measurements)
+            .map(|history| history.original().captured_at());
+        let capture_start = capture_times.clone().min().map(date).transpose()?;
+        let capture_end = capture_times.max().map(date).transpose()?;
+        items.push(json!({"png_file":format!("{item_stem}.png"),"csv_file":format!("{item_stem}.csv"),"session_status":format!("{:?}",snapshot.session.status()),"item_id":snapshot.item.id().get(),"part_number":snapshot.specification.part_number().as_str(),"specification_id":snapshot.specification.id().get(),"specification_version":snapshot.specification.version().get(),"nominal_mm":snapshot.specification.nominal().to_string(),"lsl_mm":snapshot.specification.lsl().to_string(),"usl_mm":snapshot.specification.usl().to_string(),"resolution_mm":snapshot.specification.resolution().length().to_string(),"bundle_count":statistics.bundle_count,"measurement_count":summary.measurement_count,"invalidated_count":statistics.invalidated_count,"mean_mm":statistic(&summary.mean_mm),"median_mm":statistic(&summary.median_mm),"sample_standard_deviation_mm":statistic(&summary.sample_standard_deviation_mm),"out_of_specification_count":summary.out_of_specification_count,"out_of_specification_percentage":statistic(&summary.out_of_specification_percentage),"algorithm":statistics.algorithm,"algorithm_version":statistics.algorithm_version,"histogram_edges_nm":histogram.edges.as_slice().iter().map(|l|l.nanometres()).collect::<Vec<_>>(),"histogram_counts":histogram.counts,"session_created_utc":date(snapshot.session.created_at())?,"capture_start_utc":capture_start,"capture_end_utc":capture_end,"session_closed_utc":snapshot.session.closed_at().map(date).transpose()?}));
     }
     if snapshots.is_empty() {
         let path = directory.join(format!("{stem}.png"));
@@ -375,7 +454,7 @@ pub fn export_session(
         files.push((path, bytes));
     }
     let manifest = directory.join(format!("{stem}.manifest.json"));
-    let manifest_data=serde_json::to_vec_pretty(&json!({"format_version":1,"complete":true,"export_id":export_id,"session_id":session.get(),"revision":reference.map(|r|r.get()),"generated_at_utc":date(generated_at)?,"notes":notes,"unit":"mm","items":items,"files":files.iter().map(|(p,b)|json!({"name":p.file_name().map(|v|v.to_string_lossy()),"bytes":b.len()})).collect::<Vec<_>>(),"verification_filter":"row_kind=effective AND value_mm is nonempty","csv_dialect":"UTF-8, quoted comma-delimited, CRLF, ASCII decimal point, blank=unavailable","spreadsheet_warning":"Canonical CSV preserves operator text including '='; import every column as text, do not open as trusted formulas."})).map_err(|e|ReportError::Rendering(e.to_string()))?;
+    let manifest_data=serde_json::to_vec_pretty(&json!({"format_version":2,"report_scope":if part.is_some() { "part_number" } else { "session" },"plot_population":"All effective measurements across this Part Number/specification; capture positions retain retractions; coincident points may overlap; exact bundle provenance is in CSV.","complete":true,"export_id":export_id,"session_id":session.get(),"revision":reference.map(|r|r.get()),"generated_at_utc":date(generated_at)?,"notes":notes,"unit":"mm","items":items,"files":files.iter().map(|(p,b)|json!({"name":p.file_name().map(|v|v.to_string_lossy()),"bytes":b.len()})).collect::<Vec<_>>(),"verification_filter":"row_kind=effective AND value_mm is nonempty","csv_dialect":"UTF-8, quoted comma-delimited, CRLF, ASCII decimal point, blank=unavailable","spreadsheet_warning":"Canonical CSV preserves operator text including '='; import every column as text, do not open as trusted formulas."})).map_err(|e|ReportError::Rendering(e.to_string()))?;
     let mut published = Vec::new();
     let result = (|| {
         for (path, bytes) in &files {

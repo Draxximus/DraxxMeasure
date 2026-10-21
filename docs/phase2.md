@@ -12,7 +12,7 @@ draxx-application → draxx-core
 Application use cases are now concrete, so `draxx-application` is the small shared
 orchestration package anticipated by ADR 0001. Neither core nor storage depends
 on it. No terminal callbacks own reconstruction/calculation/transaction policy.
-The CLI directly invokes headless export after closure; a future GUI can use the
+The CLI directly invokes headless export after Part Number closure; a future GUI can use the
 same service and snapshot/export APIs without reproducing formulas in JavaScript.
 
 ## Context and lifecycle
@@ -24,8 +24,8 @@ bundle. Numeric lines in a bundle capture immediately, without a command prefix.
 `/close` changes only one level: bundle → Part Number → session → root. Part-level
 closure is **navigation**, persisted in `session_context`, not catalog deletion or
 a new global Part Number status. A part can be reselected later in the same session.
-Session closure is sealed, requires no open bundle and no selected part context,
-and is committed before attempting exports. Empty sessions/items can be reported;
+Session closure is sealed and requires no open bundle and no selected part context.
+Part context closure commits before exporting its report. Empty sessions/items can be reported;
 empty bundles cannot close and must receive valid observations before closure.
 
 At most one bundle is open per session. Session items/bundles/measurements use
@@ -122,8 +122,11 @@ Database corruption errors never cause automatic deletion, rebuilding or repair.
 Recovery restores the selected item, open bundle, exact specification/policy and
 effective occupancy from committed state. EOF, `/exit`, or process termination
 does not silently close a context. `/resume ID` explicitly resumes a suspended
-session or continues an Active one; it never reopens a Closed session. No raw-mode
-terminal state needs restoration in this line-oriented adapter.
+session or continues an Active one; it never reopens a Closed session. The Ratatui
+adapter restores raw mode, the alternate screen, cursor visibility, and bracketed
+paste on exit; a guard also covers returned errors. Ratatui installs its panic
+restoration hook during initialization. The plain line adapter remains available
+for redirected streams and `--line`. See [terminal screen behavior](terminal-screen.md).
 
 ## Statistics and export
 
@@ -137,12 +140,13 @@ silently losing integer precision; dimensional storage itself supports i64 range
 Histograms use explicit increasing integer-nm edges covering data and specifications,
 left-inclusive bins and an inclusive final right edge. Counts include all OOS data.
 
-Session report snapshots are read in one transaction. Plotters produces English
-1800x2000 PNG pages, up to four bundle panels per page, repeating population-wide
-summary/histogram and showing detail bundle means/min-max ranges. Other items
-always get separate pages. All effective points appear, including OOS points and
-original sequence gaps. Limits are engineering limits, not statistical control
-limits; observed ranges are not confidence intervals. A bundled licensed font
+Part Number closure generates a report immediately while the session stays active.
+Its snapshot is read consistently after the context change commits; all source
+bundles must be closed. Plotters produces one English 1800x2000 PNG per Part Number/
+specification with all bundles combined in one histogram, one ordered measurement
+plot, and an overall descriptive summary. All effective points are drawn, including
+OOS values; retracted capture positions remain gaps. Coincident points may overlap,
+with exact detail retained in CSV. Limits are engineering limits. A bundled licensed font
 removes the runtime dependency on system font discovery.
 
 Each CSV includes original rows, linked correction rows, and explicit effective
@@ -156,8 +160,11 @@ Files are staged in the destination directory, flushed, and published without
 clobbering existing names. The complete manifest is published last; interrupted
 sets without it are not complete. An ordinary failure removes only outputs created
 by that failed attempt; a later retry uses fresh collision-safe names. No report
-failure changes inspection data or reopens the session. `/report ID` retries a
-Closed session, including after restart with another `--reports-dir`.
+failure changes inspection data. `/report part ITEM_ID` retries one part, including
+after restart with another `--reports-dir`; `/report` retries the last closed part.
+Session closure does not automatically duplicate part reports. `/report SESSION_ID`
+can explicitly export all parts of a Closed session from one read transaction.
+Reselecting and closing a part again creates a new cumulative export at a new cutoff.
 
 ## Verified behavior and limitations
 
@@ -165,7 +172,8 @@ Tests cover exact reconstruction/rollover/ambiguity, 42/43 capacity, restoration
 immutable corrections, transaction rollback, idempotency/conflicts, competing
 writers, multi-part end-to-end sessions, dynamic bundle counts, process termination
 after acknowledgement, report failure/retry/no overwrite, CSV round-trips and
-independent statistical recomputation, PNG decoding/panels, and pagination.
+independent statistical recomputation, PNG decoding/panels, combined multi-bundle
+plots, immediate part exports, and fresh snapshots after reselecting a part.
 
 Only Linux execution has been verified. Windows uses portable paths/line input and
 Rust-native font rendering but still needs native testing. Process termination is

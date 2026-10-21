@@ -94,15 +94,15 @@ try {
     Assert-That (([regex]::Matches($captured, ' mm saved \[')).Count -eq 42) 'Unexpected number of accepted measurements.'
     Assert-That ($captured.Contains('PNG report generated') -and -not $captured.Contains('Report failed:')) 'Release PNG generation failed.'
     $database = Join-Path $app 'data/draxxmeasure.sqlite3'
-    $png = Join-Path $app 'reports/session-001.png'
+    $png = Join-Path $app 'reports/session-001-part-405363-item-001.png'
     Assert-That (Test-Path -LiteralPath $database -PathType Leaf) 'Executable-relative SQLite database missing.'
     $bytes = [IO.File]::ReadAllBytes($png)
     Assert-That ($bytes.Length -gt 1000) 'PNG output is unexpectedly small.'
     Assert-That ([Convert]::ToHexString([byte[]]($bytes[0..7])) -eq '89504E470D0A1A0A') 'Invalid PNG signature.'
     Assert-That ([Convert]::ToHexString([byte[]]($bytes[16..23])) -eq '00000708000007D0') 'PNG dimensions are not 1800x2000.'
-    $manifest = Get-Content -LiteralPath (Join-Path $app 'reports/session-001.manifest.json') -Raw | ConvertFrom-Json
+    $manifest = Get-Content -LiteralPath (Join-Path $app 'reports/session-001-part-405363-item-001.manifest.json') -Raw | ConvertFrom-Json
     Assert-That ($manifest.complete -and $manifest.items[0].measurement_count -eq 42) 'Manifest population is incorrect.'
-    $rows = @(Import-Csv -LiteralPath (Join-Path $app 'reports/session-001-item-001.csv') | Where-Object { $_.row_kind -eq 'effective' -and $_.value_mm -ne '' })
+    $rows = @(Import-Csv -LiteralPath (Join-Path $app 'reports/session-001-part-405363-item-001.csv') | Where-Object { $_.row_kind -eq 'effective' -and $_.value_mm -ne '' })
     Assert-That ($rows.Count -eq 42 -and @($rows | Where-Object raw_input -NE '68').Count -eq 0) 'Rejected measurement #43 was persisted.'
     Assert-That (-not (Test-Path -LiteralPath (Join-Path $cwd 'data'))) 'Default data depends on current working directory.'
     Assert-That (-not (Test-Path -LiteralPath (Join-Path $cwd 'reports'))) 'Default reports depend on current working directory.'

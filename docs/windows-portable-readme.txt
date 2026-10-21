@@ -52,8 +52,11 @@ RECOVERY AND REPORTS
 /exit or an interruption leaves committed sessions recoverable. Restart using
 the SAME database path, then /sessions and /resume ID. Unacknowledged draft input
 is not guaranteed durable; inspect recovered state before re-entering it.
-Session closure generates PNG/CSV reports. If export fails, inspection data is
-preserved; use /report ID, or restart with a writable --reports-dir and retry.
+Closing a Part Number generates one PNG/CSV report combining all its bundles,
+even while the session stays open. If export fails, inspection data is preserved;
+use /report to retry the last closed part, or /report part ITEM_ID after restart.
+You can restart with a writable --reports-dir. Session closure does not generate
+another automatic report; /report SESSION_ID explicitly exports a closed session.
 Import canonical CSV as TEXT because original '=' inputs may look like formulas.
 
 SAFE UPDATE (NEVER REPLACE YOUR DATA FOLDER)

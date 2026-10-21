@@ -75,25 +75,34 @@ completeness, finite outputs, and display configuration before outputting succes
 - Summary: required statistics, bundle/sample counts, invalidation/missing-data
   notes, OOS low/high/total and percentage, and explicit N/A reasons.
 - Histogram: exact declared bins/frequencies; labeled nominal/LSL/USL lines.
-- Individuals: effective observations in original per-bundle sequence with bundle
-  identities/boundaries; explain gaps and missing data, never interpolate them.
-- Bundle comparison: means and **observed min–max** ranges with sample counts.
-  Whiskers are not confidence intervals/control limits. Empty bundles stay visible.
+- Individuals: all effective observations for one Part Number/specification in
+  one plot, concatenating bundle capture sequences and retaining retracted gaps.
+  Bundle IDs/order remain in the verification CSV; no separate bundle panels.
+- Part Number summary: overall mean/median/sample SD, min/max/range, signed mean
+  deviation, and low/high/total OOS counts. Empty results show N/A with reasons.
 - Footer: snapshot and algorithm identity, factual instrument/calibration metadata
   or unknown, inclusion/correction policy, and separate interpretation notes.
 
 The earlier established length-variation design artifact is absent. This is a
 provisional functional contract, not a claimed visual reproduction. Obtain that
-artifact before committing to visual fidelity. Rendering adapts to actual counts,
-using readable numbered PNG pages rather than undisclosed downsampling. Every
-measurement must be represented in the output set or a clearly declared detail
-dataset; never silently truncate axes at specification limits.
+artifact before committing to visual fidelity. Format 2 produces one PNG per Part
+Number/specification, with all bundles combined. Every effective point is drawn;
+coincident points may overlap, as declared on the PNG and manifest. CSV supplies
+exact detail at large populations. Axes cover observations and specification limits.
 
 ## Export contracts
 
-`PngExporter::render` returns numbered PNG byte pages; `CsvExporter::write` emits
+`PngExporter::render` returns one PNG byte page per Part Number; `CsvExporter::write` emits
 UTF-8 verification data to a writer. They are headless Rust services, with no
 Tauri/browser dependencies and no frontend recalculation.
+
+Part Number closure triggers `export_part` after committing navigation out of the
+part context. Its session can remain Active. All bundles in the exported snapshot
+must be closed. `/report part ITEM_ID` retries this export after failure/restart;
+`/report` retries the latest part closed in the current process. Closing the session
+does not trigger another automatic export. `/report SESSION_ID` explicitly exports
+a closed session with one PNG/CSV per Part Number and a shared session manifest.
+Report format 2 manifests record scope, cutoff, session state and per-item filenames.
 
 CSV format will use a versioned schema and deterministic row order. Include exact
 raw/effective values, units, original IDs/sequence/time, session/item/bundle/spec

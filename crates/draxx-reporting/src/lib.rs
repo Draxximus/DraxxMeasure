@@ -7,7 +7,7 @@ use draxx_statistics::{Histogram, InspectionStatistics};
 
 mod export;
 mod render;
-pub use export::{ExportedReport, VerificationCsv, export_session};
+pub use export::{ExportedReport, VerificationCsv, export_part, export_session};
 pub use render::PlottersExporter;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,7 +62,7 @@ impl ReportInput<'_> {
     }
 }
 
-/// Numbered pages share one export/snapshot ID. No undisclosed downsampling.
+/// One PNG per Part Number/specification snapshot; no bundle pagination.
 #[derive(Clone, Debug)]
 pub struct PngPage {
     pub page_number: NonZeroU32,
@@ -105,8 +105,8 @@ impl Error for ReportError {
 }
 
 pub trait PngExporter {
-    /// Validate identity; include histogram, individuals by bundle, and bundle
-    /// means/min-max ranges with nominal/LSL/USL and English metadata.
+    /// Validate identity; combine all bundles into one Part Number histogram,
+    /// ordered measurement plot, and descriptive summary with nominal/LSL/USL.
     fn render(&self, input: &ReportInput<'_>) -> Result<Vec<PngPage>, ReportError>;
 }
 

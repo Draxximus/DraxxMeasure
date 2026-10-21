@@ -47,13 +47,19 @@ specific storage/rendering/identity/publication purposes. Tauri is deliberately 
 - `draxx-statistics`: `StatisticsEngine`, explicit unavailable metrics, exact
   extrema/range, descriptive floating outputs in mm, and histogram edge contracts.
 - `draxx-reporting`: `ReportInput` references one snapshot and its derived results;
-  `PngExporter` returns numbered raster pages and `CsvExporter` writes to a stream.
+  `PngExporter` returns one raster page per Part Number/specification and
+  `CsvExporter` writes to a stream. Part context closure invokes `export_part` from
+  a committed snapshot; session closure does not duplicate automatic exports.
   The headless export service publishes a no-clobber file set and manifest; no
   inspection writes occur.
 - `draxx-application`: context navigation, capture/reconstruction, explicit
   corrections and same-request retry over the storage port.
-- `draxx-cli`: portable standard-library startup/slash-command parsing and line
-  input. No dashboard/Clap/Crossterm/Ratatui dependency is needed for this workflow.
+- `draxx-cli`: portable startup/slash-command parsing, line input, and a Ratatui
+  screen using Crossterm. Both presentations use the same capture controller.
+  A single worker owns the synchronous controller/SQLite connection while the
+  screen thread handles events and draws committed read views. Channels carry
+  complete input lines, rejection feedback, and output; no terminal callback owns
+  transaction or measurement rules. See [ADR 0007](decisions/0007-ratatui-screen.md).
 
 `DomainError`, `ReconstructionError`, `StorageError`, `AnalysisError`, and
 `ReportError` distinguish recoverable failure classes. Wrapped backend/I/O causes
